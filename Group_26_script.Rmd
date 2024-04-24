@@ -1,0 +1,305 @@
+---
+title: "Life Expectancy - Statistics Project"
+output: html_notebook
+
+#Group_26
+students:   David Halder    -   20220632   
+            Felix Gayer     -   20220320
+            Rita Soares     -   20220616
+            Lukas Stark     -   20220626
+---
+#Libraries
+```{r}
+library(lmtest)
+library(ggplot2)
+library(reshape2)
+library(tidyverse)
+library(car)
+library(zoo)
+library(dplyr)
+library(Hmisc)
+library(ggcorrplot)
+```
+
+#Import Data
+```{r}
+data = read.csv(file = 'LED.csv')
+
+head(data,3)
+```
+
+```{r}
+colnames(data)
+head(data)
+
+```
+
+
+
+#Preprocessing Imputation
+```{r}
+
+#################### FUNCTION PRE PROCESSING ##############################
+
+#Checking for NaN values in out dataFrame
+sum(is.na(data))
+
+#SELECT THE DATA PER YEAR:
+
+DataPerYear <- function(yearInfo) {
+  Data <- subset(data,(data["Year"]==yearInfo))
+  return(Data)
+}
+
+
+#TREAT THE NaN VALUES USING THE MEAN PER STATUS
+TreatNaValues <- function(dataSet) {
+  NonDevData <- subset(dataSet,(dataSet["Developed_Dummy"]== 0))
+  DevData <- subset(dataSet,(dataSet["Developed_Dummy"]== 1))
+  NumeriNonDevcData <- as.data.frame.array(sapply(select(NonDevData, 
+                                                   -c(Country,Status,Year)), 
+                                            as.numeric))
+  NumeriDevcData <- as.data.frame.array(sapply(select(DevData, 
+                                                         -c(Country,Status,Year)), 
+                                                  as.numeric)) 
+  DevTreatData <- na.aggregate(NumeriDevcData)
+  NonDevTreatData <- na.aggregate(NumeriNonDevcData)
+  FinalTreatData <- rbind(NonDevTreatData, DevTreatData)
+  return(FinalTreatData)
+}
+################################################################################
+
+data$Developed_Dummy <- ifelse(data$Status == "Developed", 1, 0)
+data = DataPerYear(2000)
+data = TreatNaValues(data)
+
+#Checking for NaN values in out dataFrame after Preprocessing
+sum(is.na(data))
+
+```
+
+
+```{r}
+#Creating a Baseline Model:
+
+set.seed(456789)
+base_lm = lm(Life.expectancy~., data = data)
+summary(base_lm)
+
+
+# We are dropping variables from the baseline model which have a p-value > 0.3 
+# We are choosing p-values which are that high since they can be sensitive to fluctuations when we transform the data
+# and could 
+
+#percentage.expenditure           (p-value = 0.9477)
+#Hepatitis.B                      (p-value = 0.5738)
+#Measles                          (p-value = 0.6122) 
+#Total.expenditure                (p-value = 0.9707)
+#Income.composition.of.resources  (p-value = 0.5558)
+
+```
+#Multiple Linear Regression Assumptions:
+#MLR1: Linear in Parameters
+  #We assume that this is given due to the use of the lm-function
+
+#Multiple Linear Regression Assumptions:
+#MLR2: Random Sampling
+  #Based dataset, we assume that this is given
+
+#MLR3: No Perfect Collinearity
+  #We are analyzing the dataset for perfect Collinearity:
+  #Between the variables "infant.deaths" and "under.five.deaths" there is a correlation value of 1 and a variable inflation score of over 200
+  #Thus we drop the variable which has the lower impact on the dependent variable: "infant.deaths" and
+  #
+  #Furthermore we checked the dataset for Multicollinearity:  
+  #The variables "thinness..1.19.years" and	"thinness.5.9.years" show a very high correlation (0.94) and a variable inflation score over 10
+  #As Multicollinearity can affect the interpretation of the values we drop the variable 
+  #which has the lower influence on the dependent variable #(#thinness..1.19.years )
+
+```{r}
+# plotting the correlation heatmap
+#visualize correlation matrix 
+ggcorrplot(cor(data),tl.cex=8,colors = c('deepskyblue3','white','red'))
+geom_tile()
+```
+
+
+```{r}
+#1.Check the VIF for the variables of the unchanged model
+#2.Check for the differences when dropping either "infant.deaths" or "under.five.deaths"
+#3. Check the differences when dropping either #thinness..1.19.years or thinness.5.9.years
+
+model_1=lm(Life.expectancy~
+  Adult.Mortality +
+  under.five.deaths+
+  Alcohol+
+  BMI+
+  Polio+
+  Diphtheria+
+  HIV.AIDS+
+  Population+
+  thinness.5.9.years+
+  Schooling+
+  Developed_Dummy
+  ,data = data)
+
+
+plot(model_1)
+summary(model_1)
+```
+
+
+```{r}
+# Check the Variance Inflation Scores 
+vif(model_1)
+```
+
+#MLR4: Zero Conditional Mean:
+```{r}
+#The zero conditional mean assumption is assumed to be given
+```
+
+#MLR5: Homoscedasticity
+```{r}
+#In order to test for Heteroskedasticity we utilize the Breusch Pagan Test and the special white test
+
+bptest(model_1) #BP Test
+bptest(model_1, ~ fitted(model_1) + I(fitted(model_1)^2) ) #Special White 
+
+#Since the p-value is smaller than 0.05 
+#we reject the H0 hypothesis that Homoscedasticity is present and conclude
+# that heteroscedasticity is present in the regression model.
+
+#Therefore from now on only the refined white heteroscedasticity-robust SE coefficient test will be used
+
+```
+
+#MLR6: Normality
+
+```{r}
+#Normality is assumed to be given, since the dataset is large enough
+nrow(data)
+```
+
+#Reset Test
+ # In order to test our model for functional form misspecification
+ # we utilize pairplots and the Ramsey RESET test
+ 
+ #We are performing various transformations to the model and 
+ 
+ 
+```{r}
+#We check for the relationships between the dependent and the independent variables
+test_file = data
+
+#Drop columns which are already omitted from the model
+test_file = test_file[ , -which(names(test_file) %in% c("infant.deaths", "percentage.expenditure","Hepatitis.B", "Measles", "Total.expenditure ","Income.composition.of.resources", "thinness..1.19.years"))]
+
+for(i in 2:ncol(test_file)) {
+  plot(test_file[,i], test_file$Life.expectancy, xlab=colnames(test_file[i]), ylab="Life.expectancy")
+}
+```
+ 
+```{r}
+#Reset Test & Final Model
+
+model_final <- lm(log(Life.expectancy)~
+     Developed_Dummy+
+     log(Adult.Mortality) +
+     Alcohol+
+     BMI+
+     HIV.AIDS+
+     Schooling+
+     I(Adult.Mortality*HIV.AIDS)+
+     I(Alcohol*BMI)+
+     I(BMI*Diphtheria)+
+     I(Adult.Mortality^2)+
+     I(Diphtheria^2)
+     , data = data)
+
+resettest(model_final)
+plot(model_final)
+coeftest(model_final, vcov=hccm)
+```
+
+
+```{r}
+#The model explains 88% of the variance of the dataset
+summary(model_final)$r.squared
+
+#The adjusted R² has a value of 0.87, which takes the number of variables 
+#in the model into account. It means, that we can explain 87% of the variance in the dataset.
+summary(model_final)$adj.r.squared
+```
+
+# Benchmark Model
+# to check for the reliability of the model, a second one was calculated omitting the status of the country 
+
+
+```{r}
+model_2=lm(Life.expectancy~
+  Adult.Mortality +
+  under.five.deaths+
+  Alcohol+
+  BMI+
+  Polio+
+  Diphtheria+
+  HIV.AIDS+
+  Population+
+  thinness.5.9.years+
+  Schooling
+  ,data = data)
+
+
+plot(model_2)
+summary(model_2)
+```
+
+
+```{r}
+#In order to test for Heteroskedasticity we utilize the Breusch Pagan Test and the special white test
+
+bptest(model_2) #BP Test
+bptest(model_2, ~ fitted(model_2) + I(fitted(model_2)^2) ) #Special White 
+
+#Therefore from now on only the refined white heteroscedasticity-robust SE coeftest will be used
+```
+
+
+```{r}
+#Reset and coeftest for the benchmark model
+
+model_final_2 <- lm(log(Life.expectancy)~
+     Adult.Mortality +
+     Alcohol+
+     BMI+
+     HIV.AIDS+
+     Schooling+
+     I(Adult.Mortality*HIV.AIDS)+
+     I(Alcohol*BMI)+
+     I(BMI*Diphtheria)+
+     I(Adult.Mortality^2)+
+     I(Diphtheria^2)
+     , data = data)
+
+resettest(model_final_2)
+coeftest(model_final_2, vcov=hccm)
+```
+
+
+```{r}
+#The model explains 88% of the variance of the dataset
+summary(model_final_2)$r.squared
+
+#The adjusted R² has a value of 0.87, which takes the number of variables 
+#in the model into account. It means, that we can explain 87% of the variance in the dataset.
+summary(model_final_2)$adj.r.squared
+
+```
+
+
+
+
+
+
+
