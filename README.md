@@ -1,5 +1,5 @@
 # Statistics 
 
-**Task:** Stastical study on life expectancy 
+**Task:** Statistical study on life expectancy 
 
 **Tools:** R and Tableau
